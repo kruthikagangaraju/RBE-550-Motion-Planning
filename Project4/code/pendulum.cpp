@@ -94,133 +94,68 @@ void planPendulum(ompl::control::SimpleSetupPtr &ss, int choice)
     // TODO: Do some motion planning for the pendulum
     // choice is what planner to use.
     ob::ScopedState<> start(ss->getStateSpace());
-    start[0]= -M_PI/2;
-    start[1]= 0;
+    start[0] = -M_PI / 2;
+    start[1] = 0;
 
     ob::ScopedState<> goal(ss->getStateSpace());
-    goal[0] = +M_PI/2;
+    goal[0] = +M_PI / 2;
     goal[1] = 0;
 
-    ss.setStartAndGoalStates(start, goal, 0.05);
-    // ob::PlannerPtr planner;
-    if(choice == 1)
+    ss->setStartAndGoalStates(start, goal, 0.05);
+
+    if (choice == 1)
+        ss->setPlanner(std::make_shared<oc::RRT>(ss->getSpaceInformation()));
+    else if (choice == 2)
+        ss->setPlanner(std::make_shared<oc::KPIECE1>(ss->getSpaceInformation()));
+    else if (choice == 3)
+        ss->setPlanner(std::make_shared<RGRRT>(ss->getSpaceInformation())); // Corrected planner
+
+    ob::PlannerStatus solved = ss->solve(5.0);
+
+    if (solved)
     {
-        //planner = std::make_shared<oc::RRT>(ss->getSpaceInformation());
-        ss.setPlanner(std::make_shared<oc::RRT>(ss.getSpaceInformation()));
-        ob::PlannerStatus solved = ss.solve(5.0);
+        std::cout << "Found solution:" << std::endl;
+        og::PathGeometric &path = ss->getSolutionPath();
+        path.interpolate(50);
 
-        if (solved)
-        {
-            std::cout << "Found solution:" << std::endl;
-            og::PathGeometric& path = ss.getSolutionPath();
-            path.interpolate(50);
+        path.printAsMatrix(std::cout);
 
-            path.printAsMatrix(std::cout);
-
-            std::ofstream output("rrt_pendulum.txt");
-            output << "Pendulum " << std::endl;
-            path.printAsMatrix(output);
-            output.close();
-        }
-        else
-        {
-            std::cout << "No Solution found" << std::endl;
-        }
-
+        std::ofstream output("pendulum_" + std::to_string(choice) + ".txt"); // Different filenames
+        output << "Pendulum " << std::endl;
+        path.printAsMatrix(output);
+        output.close();
     }
-    else if(choice == 2)
-    {
-        ss.setPlanner(std::make_shared<oc::KPIECE1>(ss.getSpaceInformation()));
-        ob::PlannerStatus solved = ss.solve(5.0);
-
-        if (solved)
-        {
-            std::cout << "Found solution:" << std::endl;
-            og::PathGeometric& path = ss.getSolutionPath();
-            path.interpolate(50);
-
-            path.printAsMatrix(std::cout);
-
-            std::ofstream output("rrt_pendulum.txt");
-            output << "Pendulum " << std::endl;
-            path.printAsMatrix(output);
-            output.close();
-        }
-        else
-        {
-            std::cout << "No Solution found" << std::endl;
-        }
-    }
-    else if(choice == 3)
-    {
-        ss.setPlanner(std::make_shared<oc::RG-RRT>(ss.getSpaceInformation()));
-        ob::PlannerStatus solved = ss.solve(5.0);
-
-        if (solved)
-        {
-            std::cout << "Found solution:" << std::endl;
-            og::PathGeometric& path = ss.getSolutionPath();
-            path.interpolate(50);
-
-            path.printAsMatrix(std::cout);
-
-            std::ofstream output("rrt_pendulum.txt");
-            output << "Pendulum " << std::endl;
-            path.printAsMatrix(output);
-            output.close();
-        }
-        else
-        {
-            std::cout << "No Solution found" << std::endl;
-        }
-    }
-    //ss->setPlanner(planner);
-    //ss->solve(5.0);
+    else
+        std::cout << "No Solution found" << std::endl;
 }
 
-void benchmarkPendulum(ompl::control::SimpleSetupPtr &ss)
+void benchmarkPendulum(ompl::control::SimpleSetupPtr &ss, double torque)
 {
     // TODO: Do some benchmarking for the pendulum
     std::cout << "Starting benchmark..." << std::endl;
     auto space = ss->getStateSpace();
 
-        // Set projection as default
-        space->registerDefaultProjection(ob::ProjectionEvaluatorPtr(new PendulumProjection(space)));
+    space->registerDefaultProjection(std::make_shared<PendulumProjection>(space));
 
-        // Create benchmark class
-        ot::Benchmark b(ss, "Pendulum_Benchmark");
+    ot::Benchmark b(*ss, "Pendulum_Benchmark");
 
-        // Add planners to evaluate
-        auto si = ss.getSpaceInformation();
-        
-        auto kpiece = std::make_shared<oc::KPIECE1>(si);
-        kpiece->setName("KPIECE1");
-        b.addPlanner(kpiece);
+    auto si = ss->getSpaceInformation();
 
-        auto rrt = std::make_shared<oc::RRT>(si);
-        rrt->setName("RRT");
-        b.addPlanner(rrt);
+    b.addPlanner(std::make_shared<oc::KPIECE1>(si));
+    b.addPlanner(std::make_shared<oc::RRT>(si));
+    b.addPlanner(std::make_shared<RGRRT>(si));
 
-        auto rgrrt = std::make_shared<oc::RGRRT>(si);
-        rgrrt->setName("RGRRT");
-        rgrrt->setSystemType("pendulum");
-        b.addPlanner(rgrrt);
+    ot::Benchmark::Request req;
+    req.maxTime = 30.0;
+    req.maxMem = 8000.0;
+    req.runCount = 30;
+    req.displayProgress = true;
 
-        // Configure benchmark request
-        ot::Benchmark::Request req;
-        req.maxTime = 30.0;
-        req.maxMem = 8000.0;
-        req.runCount = 30;
-        req.displayProgress = true;
+    b.benchmark(req);
 
-        // Run benchmark
-        std::cout << "Running benchmark..." << std::endl;
-        b.benchmark(req);
-
-        // Save results
-        std::string filename = "pendulum_benchmark_torque" + std::to_string(_maxTorque) + ".log";
-        b.saveResultsToFile(filename.c_str());
-        std::cout << "Benchmark results saved to: " << filename << std::endl;
+    std::string filename = "pendulum_benchmark_torque" + std::to_string(torque) + ".log"; // Fixed torque reference
+    b.saveResultsToFile(filename.c_str());
+    std::cout << "Benchmark results saved to: " << filename << std::endl;
 }
 
 int main(int argc, char **argv)
@@ -269,7 +204,7 @@ int main(int argc, char **argv)
     }
     // Benchmarking
     else if (choice == 2)
-        benchmarkPendulum(ss);
+        benchmarkPendulum(ss, torque);
 
     else
         std::cerr << "How did you get here? Invalid choice." << std::endl;
