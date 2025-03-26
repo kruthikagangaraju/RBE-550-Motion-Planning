@@ -14,9 +14,13 @@
 #include <ompl/control/SpaceInformation.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/control/spaces/RealVectorControlSpace.h>
-#include <ompl/geometric/planners/rrt/RRT.h>
+//#include <ompl/geometric/planners/rrt/RRT.h>
+#include <ompl/control/planners/rrt/RRT.h>
 #include <ompl/control/planners/kpiece/KPIECE1.h>
 #include <ompl/tools/benchmark/Benchmark.h>
+#include <ompl/control/SpaceInformation.h>
+#include <ompl/base/spaces/SE2StateSpace.h>
+#include <ompl/base/spaces/SO2StateSpace.h>
 
 // Your implementation of RG-RRT
 #include "RG-RRT.h"
@@ -24,6 +28,7 @@
 namespace ob = ompl::base;
 namespace oc = ompl::control;
 namespace og = ompl::geometric;
+namespace ot = ompl::tools;
 
 // Your projection for the pendulum
 class PendulumProjection : public ompl::base::ProjectionEvaluator
@@ -48,6 +53,13 @@ public:
     }
 };
 
+bool isStateValid(const oc::SpaceInformation* si, const ob::State* state)
+
+{
+    // return a value that is always true but uses the two variables we define, so we avoid compiler warnings
+    return si->satisfiesBounds(state);
+}
+
 void pendulumODE(const ompl::control::ODESolver::StateType &q, const ompl::control::Control *control, ompl::control::ODESolver::StateType &qdot)
 {
     // TODO: Fill in the ODE for the pendulum's dynamics
@@ -64,13 +76,16 @@ ompl::control::SimpleSetupPtr createPendulum(double torque)
 {
     // TODO: Create and setup the pendulum's state space, control space, validity checker, everything you need for
     // planning.
-    auto stateSpace = std::make_shared<ob::RealVectorStateSpace>(2);
-    ob::RealVectorBounds sbounds(2);
-    sbounds.setLow(0, -M_PI);
-    sbounds.setHigh(0, M_PI);
-    sbounds.setLow(1, -10.0);
-    sbounds.setHigh(1, 10.0);
-    stateSpace->as<ob::RealVectorStateSpace>()->setBounds(sbounds);
+    auto stateSpace = std::make_shared<ob::CompoundStateSpace>();
+    auto theta = std::make_shared<ob::SO2StateSpace>();
+    auto omega = std::make_shared<ompl::base::RealVectorStateSpace>(1);
+    ob::RealVectorBounds sbounds(1);
+    sbounds.setLow(-10.0);
+    sbounds.setHigh(10.0);
+    omega->as<ob::RealVectorStateSpace>()->setBounds(sbounds);
+
+    stateSpace->addSubspace(theta, 1.0);
+    stateSpace->addSubspace(omega, 1.0);
 
     auto controlSpace = std::make_shared<oc::RealVectorControlSpace>(stateSpace, 1);
     ob::RealVectorBounds cbounds(1);
@@ -78,14 +93,19 @@ ompl::control::SimpleSetupPtr createPendulum(double torque)
     cbounds.setHigh(torque);
     controlSpace->setBounds(cbounds);
 
-    auto ss = std::make_shared<oc::SimpleSetup>(controlSpace);
-    oc::SpaceInformation *si = ss.getSpaceInformation().get();
+    oc::SimpleSetupPtr ss = std::make_shared<oc::SimpleSetup>(controlSpace);
+    /*oc::SpaceInformation* si = ss.getSpaceInformation().get();
     ss.setStateValidityChecker([si](const ob::State *state) 
     { 
         return isStateValid(si, state); 
-    });
+    });*/
     auto odeSolver = std::make_shared<oc::ODEBasicSolver<>>(ss->getSpaceInformation(), &pendulumODE);
     ss->setStatePropagator(oc::ODESolver::getStatePropagator(odeSolver));
+    stateSpace->registerProjection("myProjection", std::make_shared<PendulumProjection>(stateSpace.get()));
+    ss->setStateValidityChecker([&ss](const ob::State* state)
+        {
+            return isStateValid(ss->getSpaceInformation().get(), state);
+        });
     return ss;
 }
 
@@ -103,26 +123,36 @@ void planPendulum(ompl::control::SimpleSetupPtr &ss, int choice)
 
     ss->setStartAndGoalStates(start, goal, 0.05);
 
-    if (choice == 1)
+    ob::PlannerPtr planner;
+
+    switch (choice)
+    {
+    case 1:
         ss->setPlanner(std::make_shared<oc::RRT>(ss->getSpaceInformation()));
-    else if (choice == 2)
-        ss->setPlanner(std::make_shared<oc::KPIECE1>(ss->getSpaceInformation()));
-    else if (choice == 3)
-        ss->setPlanner(std::make_shared<RGRRT>(ss->getSpaceInformation())); // Corrected planner
+    case 2:
+    planner = std::make_shared<oc::KPIECE1>(ss->getSpaceInformation());
+    planner->as<oc::KPIECE1>()->setProjectionEvaluator("myProjection");
+    ss->setPlanner(planner);
+    case 3:
+    ss->setPlanner(std::make_shared<oc::RGRRT>(ss->getSpaceInformation())); // Corrected planner
+    }
+
+    ss->getSpaceInformation()->setMinMaxControlDuration(1, 10);
+    ss->getSpaceInformation()->setPropagationStepSize(0.05);
 
     ob::PlannerStatus solved = ss->solve(5.0);
 
     if (solved)
     {
         std::cout << "Found solution:" << std::endl;
-        og::PathGeometric &path = ss->getSolutionPath();
-        path.interpolate(50);
+        oc::PathControl &path = ss->getSolutionPath();
+        path.interpolate();
 
-        path.printAsMatrix(std::cout);
+        path.asGeometric().printAsMatrix(std::cout);
 
         std::ofstream output("pendulum_" + std::to_string(choice) + ".txt"); // Different filenames
         output << "Pendulum " << std::endl;
-        path.printAsMatrix(output);
+        path.asGeometric().printAsMatrix(output);
         output.close();
     }
     else
@@ -143,7 +173,7 @@ void benchmarkPendulum(ompl::control::SimpleSetupPtr &ss, double torque)
 
     b.addPlanner(std::make_shared<oc::KPIECE1>(si));
     b.addPlanner(std::make_shared<oc::RRT>(si));
-    b.addPlanner(std::make_shared<RGRRT>(si));
+    b.addPlanner(std::make_shared<oc::RGRRT>(si));
 
     ot::Benchmark::Request req;
     req.maxTime = 30.0;

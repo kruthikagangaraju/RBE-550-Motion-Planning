@@ -72,20 +72,21 @@ public:
 protected:
     class Motion{
     public:
-        Motion(const SpaceInformation *si, const SpaceInformation* siC)
-        : si_(si), siC_(siC), state(si->allocState()), control(siC->allocControl()) {}
-        const base::SpaceInformation* si_;
-        const SpaceInformation* siC_;
+        Motion(const SpaceInformation *si)
+        : state(si->allocState()), control(si->allocControl()) {}
+        //const base::SpaceInformation* si_;
+        //const SpaceInformation* siC_;
         base::State* state;
         Control* control;
         unsigned int steps{ 0 };
         Motion* parent{ nullptr };
         std::vector<base::State*> reachableStates;
+        std::vector<Motion*> reachable;
     };
 
     void freeMemory();
     
-    Motion* selectNode(Motion *sample);
+    int selectNode(Motion* qnear, Motion* qrand);
     void computeReachableSet(Motion *motion);
     double reachabilityDistance(const Motion *a, const Motion *b) const;
 
@@ -98,6 +99,8 @@ protected:
     double reachabilityDt_{0.1};
     double goalBias_{ 0.05 };
     bool addIntermediateStates_{ false };
+
+    RNG rng_;
 
     Motion* lastGoalMotion_{ nullptr };
 };

@@ -107,7 +107,7 @@ namespace ompl
 
             // Initialize tree with start state(s)
             while (const base::State* st = pis_.nextStart()) {
-                auto* motion = new Motion(si_.get(), siC_);
+                auto* motion = new Motion(siC_);
                 si_->copyState(motion->state, st);
                 siC_->nullControl(motion->control);
                 computeReachableSet(motion);
@@ -130,32 +130,42 @@ namespace ompl
             Motion* approxsol = nullptr;
             double approxdif = std::numeric_limits<double>::infinity();
 
-            auto* rmotion = new Motion(si_.get(), siC_);
+            auto* rmotion = new Motion(siC_);
             base::State* rstate = rmotion->state;
+            Control* rctrl = siC_->allocControl();
+            base::State* xstate = si_->allocState();
             
 
             while (!ptc) {
                 // Sample random state
-                sampler_->sampleUniform(rstate);
+                //sampler_->sampleUniform(rstate);
 
                 // Find nearest node with reachability consideration
-                Motion* nmotion = selectNode(static_cast<Motion*>(nn_->nearest(rmotion)));
+                int id = -1;
+                //Motion* nmotion = selectNode(static_cast<Motion*>(nn_->nearest(rmotion)));
+                Motion* nmotion = nullptr;
+
+                if (goal_s && rng_.uniform01() < goalBias_ && goal_s->canSample())
+                    goal_s->sampleGoal(rstate);
+                else
+                    sampler_->sampleUniform(rstate);
 
                 // Sample random control
                 // controlSampler_->sampleTo(rctrl, nmotion->control, nmotion->state, state);
 
                 // Propagate for fixed duration
-                Control* rctrl = siC_->allocControl();
-                base::State* xstate = si_->allocState();
-                unsigned int cd = controlSampler_->sampleTo(rctrl, nmotion->control, nmotion->xstate, xstate);
+                nmotion = nn_->nearest(rmotion);
+                id = selectNode(nmotion, rmotion);
+                
+                //unsigned int cd = controlSampler_->sampleTo(rctrl, nmotion->control, nmotion->state, xstate);
                 // cd = siC_->propagateWhileValid(nmotion->state, rctrl, cd, rstate);
 
-                if (cd >= siC_->getMinControlDuration()) {
-                    auto* motion = new Motion(si_.get(), siC_);
-                    si_->copyState(motion->state, rstate);
+                if (id!=-1) {
+                    auto* motion = new Motion(siC_);
+                    si_->copyState(motion->state, nmotion->reachable[id]->state);
                     motion->control = siC_->allocControl();
-                    siC_->copyControl(motion->control, rctrl);
-                    motion->steps = cd;
+                    siC_->copyControl(motion->control, nmotion->reachable[id]->control);
+                    motion->steps = nmotion->reachable[id]->steps;
                     motion->parent = nmotion;
 
                     computeReachableSet(motion);
@@ -175,8 +185,8 @@ namespace ompl
                         approxsol = motion;
                     }
                 }
-                si_->freeState(state);
-                siC_->freeControl(ctrl);
+                si_->freeState(xstate);
+                siC_->freeControl(rctrl);
             }
 
             // Handle solution
@@ -247,7 +257,7 @@ namespace ompl
                     tau += (bounds.high[0] - bounds.low[0]) / 10.0) {
                     cvalues[0] = tau;
                     Control* ctrl = siC_->allocControl();
-                    siC_->getControlSpace()->getValueAddressAtIndex(ctrl, 0)->setValue(tau);
+                    *siC_->getControlSpace()->getValueAddressAtIndex(ctrl, 0) = tau;
 
                     base::State* newState = si_->allocState();
                     siC_->propagate(motion->state, ctrl, 1, newState);
@@ -265,7 +275,7 @@ namespace ompl
 
                     Control* ctrl = siC_->allocControl();
                     for (unsigned int i = 0; i < dim; ++i)
-                        siC_->getControlSpace()->getValueAddressAtIndex(ctrl, i)->setValue(cvalues[i]);
+                        *siC_->getControlSpace()->getValueAddressAtIndex(ctrl, i) = cvalues[i];
 
                     base::State* newState = si_->allocState();
                     siC_->propagate(motion->state, ctrl, 1, newState);
@@ -276,7 +286,7 @@ namespace ompl
             }
         }
 
-        int RGRRT::selectNode(Motion* sample) {
+        /*Motion* RGRRT::selectNode(Motion* sample) {
             std::vector<Motion*> motions;
             nn_->nearestK(sample, 10, motions); // Check 10 nearest nodes
 
@@ -292,6 +302,24 @@ namespace ompl
             }
 
             return selected ? selected : static_cast<Motion*>(nn_->nearest(sample));
+        }*/
+
+        int RGRRT::selectNode(Motion* qnear, Motion* qrand)
+        {
+            const double nearD = si_->distance(qnear->state, qrand->state);
+            double minD = nearD;
+            const auto& reachable = qnear->reachable;
+            int id = -1;
+            for (int i = 0; i < reachable.size(); ++i)
+            {
+                double newD = si_->distance(reachable[i]->state, qrand->state);
+                if (newD < minD)
+                {
+                    minD = newD;
+                    id = i;
+                }
+            }
+            return id;
         }
 
         double RGRRT::reachabilityDistance(const Motion* a, const Motion* b) const 
@@ -299,7 +327,7 @@ namespace ompl
             double minDist = si_->distance(a->state, b->state);
 
             for (const auto& reachable : a->reachableStates) {
-                double d = si_->distance(reachable->state, b->state);
+                double d = si_->distance(reachable, b->state);
                 if (d < minDist)
                     minDist = d;
             }
