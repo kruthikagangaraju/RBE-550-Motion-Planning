@@ -1,7 +1,7 @@
 ///////////////////////////////////////
 // RBE 550
 // Project 4
-// Authors: FILL ME OUT!!
+// Authors: Kruthika Gangaraju, Jessica M Rhodes
 //////////////////////////////////////
 
 #include <iostream>
@@ -17,6 +17,9 @@
 #include <ompl/control/planners/rrt/RRT.h>
 #include <ompl/control/planners/kpiece/KPIECE1.h>
 #include <ompl/base/ProjectionEvaluator.h>
+#include <ompl/control/spaces/RealVectorControlSpace.h>
+#include <ompl/tools/benchmark/Benchmark.h>
+
 
 // The collision checker produced in project 2
 #include "CollisionChecking.h"
@@ -103,7 +106,7 @@ ompl::control::SimpleSetupPtr createCar(std::vector<Rectangle> &obstacles)
 
     ss->setStateValidityChecker([&](const ompl::base::State *state) {
         const auto *se2 = state->as<ompl::base::SE2StateSpace::StateType>();
-        return isValidSquare(se2->getX(), se2->getY(), se2->getYaw(), 0.2, obstacles);
+        return isValidSquare(se2->getX(), se2->getY(), se2->getYaw(), 0.2, obstacles, 10, -10, 10, -10);
     });
 
     return ss;
@@ -116,7 +119,7 @@ void planCar(ompl::control::SimpleSetupPtr &ss, int choice)
     ompl::base::PlannerPtr planner;
     if (choice == 1) planner = std::make_shared<ompl::control::RRT>(ss->getSpaceInformation());
     else if (choice == 2) planner = std::make_shared<ompl::control::KPIECE1>(ss->getSpaceInformation());
-    else planner = std::make_shared<RG_RRT>(ss->getSpaceInformation());
+    else planner = std::make_shared<ompl::control::RGRRT>(ss->getSpaceInformation());
     
     ss->setPlanner(planner);
     ompl::base::ScopedState<> start(ss->getStateSpace());
@@ -143,7 +146,7 @@ void benchmarkCar(ompl::control::SimpleSetupPtr &ss)
     ompl::tools::Benchmark benchmark(*ss, "Car Benchmark");
     benchmark.addPlanner(std::make_shared<ompl::control::RRT>(ss->getSpaceInformation()));
     benchmark.addPlanner(std::make_shared<ompl::control::KPIECE1>(ss->getSpaceInformation()));
-    benchmark.addPlanner(std::make_shared<RG_RRT>(ss->getSpaceInformation()));
+    benchmark.addPlanner(std::make_shared<ompl::control::RGRRT>(ss->getSpaceInformation()));
     ompl::tools::Benchmark::Request request(10.0, 1000.0, 5);
     benchmark.benchmark(request);
     benchmark.saveResultsToFile();

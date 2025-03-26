@@ -1,7 +1,7 @@
 ///////////////////////////////////////
 // RBE 550
 // Project 4
-// Authors: FILL ME OUT!!
+// Authors: Kruthika Gangaraju, Jessica M Rhodes
 //////////////////////////////////////
 
 #include "CollisionChecking.h"

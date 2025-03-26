@@ -2,6 +2,8 @@
 #define COLLISION_CHECKING_H_
 
 #include <vector>
+#include <cmath>
+#include <iostream>
 
 struct Rectangle
 {
