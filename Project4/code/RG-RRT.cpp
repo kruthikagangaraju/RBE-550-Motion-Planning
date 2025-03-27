@@ -23,31 +23,6 @@ namespace ompl
     namespace control
     {
 
-        // Helper functions
-        /*void visualizePendulumPath(const std::vector<base::State*>& states, const std::string& filename) {
-            std::ofstream file(filename);
-            for (auto state : states) {
-                auto angle = state->as<base::CompoundState>()->as<base::SO2StateSpace::StateType>(0)->value;
-                auto velocity = state->as<base::CompoundState>()->as<base::RealVectorStateSpace::StateType>(1)->values[0];
-                file << angle << " " << velocity << "\n";
-            }
-            file.close();
-            std::cout << "Pendulum path saved to " << filename << "\n";
-        }
-        void visualizeCarPath(const std::vector<base::State*>& states, const std::string& filename) {
-            std::ofstream file(filename);
-            for (auto state : states) {
-                auto x = state->as<base::SE2StateSpace::StateType>()->getX();
-                auto y = state->as<base::SE2StateSpace::StateType>()->getY();
-                auto yaw = state->as<base::SE2StateSpace::StateType>()->getYaw();
-                file << x << " " << y << " " << yaw << "\n";
-            }
-            file.close();
-            std::cout << "Car path saved to " << filename << "\n";
-        }
-                RGRRT::RGRRT(const SpaceInformationPtr& si) : RRT(si) {
-            setName("RG-RRT");
-        }*/
         RGRRT::RGRRT(const SpaceInformationPtr& si) : base::Planner(si, "RGRRT"), siC_(si.get())
         {
             specs_.approximateSolutions = true;
@@ -90,10 +65,10 @@ namespace ompl
                 nn_->list(motions);
                 for (auto& motion : motions)
                 {
-                    //if (motion->state)
-                      //  si_->freeState(motion->state);
-                    //if (motion->control)
-                      //  siC_->freeControl(motion->control);
+                    if (motion->state)
+                        si_->freeState(motion->state);
+                    if (motion->control)
+                        siC_->freeControl(motion->control);
                     delete motion;
                 }
             }
@@ -104,6 +79,11 @@ namespace ompl
             checkValidity();
             auto* goal = pdef_->getGoal().get();
             auto* goal_s = dynamic_cast<base::GoalSampleableRegion*>(goal);
+
+            if (!goal_s) {
+                OMPL_ERROR("Goal is undefined");
+                return base::PlannerStatus::INVALID_START;
+            }
 
             // Initialize tree with start state(s)
             while (const base::State* st = pis_.nextStart()) {
@@ -163,7 +143,7 @@ namespace ompl
                 if (id!=-1) {
                     auto* motion = new Motion(siC_);
                     si_->copyState(motion->state, nmotion->reachable[id]->state);
-                    motion->control = siC_->allocControl();
+                    //motion->control = siC_->allocControl();
                     siC_->copyControl(motion->control, nmotion->reachable[id]->control);
                     motion->steps = nmotion->reachable[id]->steps;
                     motion->parent = nmotion;
@@ -284,6 +264,22 @@ namespace ompl
                     siC_->freeControl(ctrl);
                 }
             }
+            /*const std::vector<double>& low_bound = siC_->getControlSpace()->as<RealVectorControlSpace>()->getBounds().low;
+            const std::vector<double>& high_bound = siC_->getControlSpace()->as<RealVectorControlSpace>()->getBounds().high;
+            for (int i = 0; i < this->RSIZE; ++i)
+            {
+                Motion* motion = new Motion(siC_);
+                siC_->copyControl(motion->control, m->control);
+                double*& controls = motion->control->as<RealVectorControlSpace::ControlType>()->values;
+                controls[0] = low_bound[0] + control_offset[0] * (i + 1);
+                for (int j = 1; j < low_bound.size(); ++j)
+                    controls[j] = high_bound[j] / 2;
+
+                motion->steps = siC_->propagateWhileValid(m->state, motion->control, siC_->getMinControlDuration(), motion->state);
+
+                if (motion->steps != 0)
+                    m->reachable.push_back(motion);
+            }*/
         }
 
         /*Motion* RGRRT::selectNode(Motion* sample) {

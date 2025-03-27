@@ -34,22 +34,33 @@ namespace ot = ompl::tools;
 class PendulumProjection : public ompl::base::ProjectionEvaluator
 {
 public:
-    PendulumProjection(const ompl::base::StateSpace *space) : ProjectionEvaluator(space)
+    PendulumProjection(const ob::StateSpacePtr &space) : ob::ProjectionEvaluator(space)
     {
     }
 
-    unsigned int getDimension() const override
+    unsigned int getDimension(void) const override
     {
         // TODO: The dimension of your projection for the pendulum
         return 2;
     }
 
+    void defaultCellSizes(void) override
+    {
+        // Set the cell sizes for the grid KPIECE uses
+        cellSizes_.resize(2);
+        cellSizes_[0] = 0.1;  // For position projection (theta)
+        cellSizes_[1] = 0.2;  // For velocity projection (omega)
+    }
+
     void project(const ompl::base::State *state, Eigen::Ref<Eigen::VectorXd> projection) const override
     {
         // TODO: Your projection for the pendulum
-        const auto *s = state->as<ob::RealVectorStateSpace::StateType>();
-        projection[0] = s->values[0];
-        projection[1] = s->values[1];
+        const auto *pendulum = state->as<ob::CompoundStateSpace::StateType>();
+        const auto* theta = pendulum->as<ob::SO2StateSpace::StateType>(0);
+        const auto* omega = pendulum->as<ob::RealVectorStateSpace::StateType>(1);
+        projection[0] = theta->value;
+        projection[1] = omega->values[0];
+        
     }
 };
 
@@ -67,9 +78,16 @@ void pendulumODE(const ompl::control::ODESolver::StateType &q, const ompl::contr
     double tau = control->as<oc::RealVectorControlSpace::ControlType>()->values[0];
     double theta = q[0];
     double omega = q[1];
-    qdot.resize(2, 0.0);
+    qdot.resize(q.size(), 0);
     qdot[0] = omega;
     qdot[1] = -g * cos(theta) + tau;
+}
+
+void postODE(const ob::State* state, const oc::Control* control, const double duration, ob::State* result)
+{
+    ob::SO2StateSpace SO2;
+    SO2.enforceBounds(result->as<ob::SO2StateSpace::StateType>());
+    //as<ob::CompoundState>()->
 }
 
 ompl::control::SimpleSetupPtr createPendulum(double torque)
@@ -100,12 +118,21 @@ ompl::control::SimpleSetupPtr createPendulum(double torque)
         return isStateValid(si, state); 
     });*/
     auto odeSolver = std::make_shared<oc::ODEBasicSolver<>>(ss->getSpaceInformation(), &pendulumODE);
-    ss->setStatePropagator(oc::ODESolver::getStatePropagator(odeSolver));
-    stateSpace->registerProjection("myProjection", std::make_shared<PendulumProjection>(stateSpace.get()));
+    ss->setStatePropagator(oc::ODESolver::getStatePropagator(odeSolver, postODE));
+    stateSpace->registerProjection("myProjection", ob::ProjectionEvaluatorPtr(new PendulumProjection(stateSpace)));
     ss->setStateValidityChecker([&ss](const ob::State* state)
         {
             return isStateValid(ss->getSpaceInformation().get(), state);
         });
+    ob::ScopedState<ob::CompoundStateSpace> start(stateSpace);
+    start[0] = -M_PI / 2;
+    start[1] = 0;
+
+    ob::ScopedState<ob::CompoundStateSpace> goal(stateSpace);
+    goal[0] = +M_PI / 2;
+    goal[1] = 0;
+
+    ss->setStartAndGoalStates(start, goal, 0.05);
     return ss;
 }
 
@@ -113,32 +140,29 @@ void planPendulum(ompl::control::SimpleSetupPtr &ss, int choice)
 {
     // TODO: Do some motion planning for the pendulum
     // choice is what planner to use.
-    ob::ScopedState<> start(ss->getStateSpace());
-    start[0] = -M_PI / 2;
-    start[1] = 0;
-
-    ob::ScopedState<> goal(ss->getStateSpace());
-    goal[0] = +M_PI / 2;
-    goal[1] = 0;
-
-    ss->setStartAndGoalStates(start, goal, 0.05);
+    
 
     ob::PlannerPtr planner;
 
     switch (choice)
     {
     case 1:
-        ss->setPlanner(std::make_shared<oc::RRT>(ss->getSpaceInformation()));
+        ss->getSpaceInformation()->setPropagationStepSize(0.05);
+        planner = std::make_shared<oc::RRT>(ss->getSpaceInformation());
+        ss->setPlanner(planner);
+        break;
     case 2:
     planner = std::make_shared<oc::KPIECE1>(ss->getSpaceInformation());
     planner->as<oc::KPIECE1>()->setProjectionEvaluator("myProjection");
     ss->setPlanner(planner);
+    break;
     case 3:
-    ss->setPlanner(std::make_shared<oc::RGRRT>(ss->getSpaceInformation())); // Corrected planner
+    ss->setPlanner(std::make_shared<oc::RGRRT>(ss->getSpaceInformation()));
+    break;
     }
 
-    ss->getSpaceInformation()->setMinMaxControlDuration(1, 10);
-    ss->getSpaceInformation()->setPropagationStepSize(0.05);
+    //ss->getSpaceInformation()->setMinMaxControlDuration(1, 10);
+    //ss->getSpaceInformation()->setPropagationStepSize(0.05);
 
     ob::PlannerStatus solved = ss->solve(5.0);
 
