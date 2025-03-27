@@ -112,8 +112,8 @@ namespace ompl
 
             auto* rmotion = new Motion(siC_);
             base::State* rstate = rmotion->state;
-            Control* rctrl = siC_->allocControl();
-            base::State* xstate = si_->allocState();
+            //Control* rctrl = siC_->allocControl();
+            //base::State* xstate = si_->allocState();
             
 
             while (!ptc) {
@@ -140,7 +140,8 @@ namespace ompl
                 //unsigned int cd = controlSampler_->sampleTo(rctrl, nmotion->control, nmotion->state, xstate);
                 // cd = siC_->propagateWhileValid(nmotion->state, rctrl, cd, rstate);
 
-                if (id!=-1) {
+                if (id!=-1) 
+                {
                     auto* motion = new Motion(siC_);
                     si_->copyState(motion->state, nmotion->reachable[id]->state);
                     //motion->control = siC_->allocControl();
@@ -165,8 +166,48 @@ namespace ompl
                         approxsol = motion;
                     }
                 }
-                si_->freeState(xstate);
-                siC_->freeControl(rctrl);
+                else
+                {
+                    // Could not find a reachable motion that brings us closer
+                    // Try to sample a control to move towards the random state
+                    Control* rctrl = siC_->allocControl();
+                    base::State* xstate = si_->allocState();
+                    unsigned int cd = controlSampler_->sampleTo(rctrl, nmotion->control, nmotion->state, xstate);
+
+                    if (cd >= siC_->getMinControlDuration())
+                    {
+                        // Create a new motion
+                        auto* motion = new Motion(siC_);
+                        si_->copyState(motion->state, xstate);
+                        siC_->copyControl(motion->control, rctrl);
+                        motion->steps = cd;
+                        motion->parent = nmotion;
+
+                        // Compute reachable set for the new motion
+                        computeReachableSet(motion);
+
+                        nn_->add(motion);
+
+                        // Check for solution
+                        double dist = 0.0;
+                        bool solv = goal->isSatisfied(motion->state, &dist);
+                        if (solv)
+                        {
+                            approxdif = dist;
+                            solution = motion;
+                            break;
+                        }
+                        if (dist < approxdif)
+                        {
+                            approxdif = dist;
+                            approxsol = motion;
+                        }
+                    }
+
+                    si_->freeState(xstate);
+                    siC_->freeControl(rctrl);
+                }
+                
             }
 
             // Handle solution
